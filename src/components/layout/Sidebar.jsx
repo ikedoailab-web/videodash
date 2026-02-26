@@ -1,13 +1,25 @@
-import { LayoutDashboard, Video, ListTodo, Settings, PlusSquare, Calendar } from 'lucide-react';
+import { useState } from 'react';
+import { LayoutDashboard, Video, ListTodo, Settings, PlusSquare, Calendar, Share2, Download, Cloud, CloudOff, Check } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { useProjects } from '../../context/ProjectContext';
 
 export function Sidebar({ className, currentView, setCurrentView }) {
+    const { exportToCSV, isCloudConnected } = useProjects();
+    const [copied, setCopied] = useState(false);
+
     const navigation = [
         { name: 'ダッシュボード', id: 'dashboard', icon: LayoutDashboard },
         { name: '案件追加', id: 'add', icon: PlusSquare },
         { name: '案件一覧・進捗', id: 'list', icon: ListTodo },
         { name: 'カレンダー', id: 'calendar', icon: Calendar },
     ];
+
+    const handleShareLink = () => {
+        navigator.clipboard.writeText(window.location.href).then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        });
+    };
 
     return (
         <div className={cn("flex h-full w-64 flex-col bg-card border-r border-border", className)}>
@@ -44,13 +56,48 @@ export function Sidebar({ className, currentView, setCurrentView }) {
                         )
                     })}
                 </nav>
+
+                {/* ツール */}
+                <div className="mt-4 pt-4 border-t border-border space-y-1">
+                    <p className="px-3 text-xs font-semibold text-foreground/40 uppercase tracking-wider mb-2">ツール</p>
+                    <button
+                        onClick={handleShareLink}
+                        className="w-full text-foreground/70 hover:bg-foreground/5 hover:text-foreground group flex items-center rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200 border border-transparent"
+                    >
+                        {copied ? (
+                            <Check className="text-green-500 mr-3 h-5 w-5 flex-shrink-0" />
+                        ) : (
+                            <Share2 className="text-foreground/50 group-hover:text-foreground mr-3 h-5 w-5 flex-shrink-0 transition-colors" />
+                        )}
+                        {copied ? 'コピーしました！' : '共有リンクをコピー'}
+                    </button>
+                    <button
+                        onClick={exportToCSV}
+                        className="w-full text-foreground/70 hover:bg-foreground/5 hover:text-foreground group flex items-center rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200 border border-transparent"
+                    >
+                        <Download className="text-foreground/50 group-hover:text-foreground mr-3 h-5 w-5 flex-shrink-0 transition-colors" />
+                        CSV出力
+                    </button>
+                </div>
             </div>
+
+            {/* 接続ステータス */}
             <div className="p-4 border-t border-border">
-                <button className="w-full text-foreground/70 hover:bg-foreground/5 hover:text-foreground group flex items-center rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200 border border-transparent">
-                    <Settings className="text-foreground/50 group-hover:text-foreground mr-3 h-5 w-5 flex-shrink-0 transition-colors" />
-                    設定
-                </button>
+                <div className={cn(
+                    "flex items-center rounded-xl px-3 py-2.5 text-xs font-medium",
+                    isCloudConnected
+                        ? "bg-green-500/10 text-green-600 dark:text-green-400"
+                        : "bg-orange-500/10 text-orange-600 dark:text-orange-400"
+                )}>
+                    {isCloudConnected ? (
+                        <Cloud className="mr-2 h-4 w-4 flex-shrink-0" />
+                    ) : (
+                        <CloudOff className="mr-2 h-4 w-4 flex-shrink-0" />
+                    )}
+                    {isCloudConnected ? 'クラウド同期中' : 'ローカル保存モード'}
+                </div>
             </div>
         </div>
     );
 }
+

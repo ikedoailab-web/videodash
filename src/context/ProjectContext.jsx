@@ -1,21 +1,13 @@
 import { createContext, useContext, useState, useEffect } from 'react';
-import { format, subDays, subMonths } from 'date-fns';
+import { format } from 'date-fns';
 import { supabase } from '../lib/supabase';
 
 const ProjectContext = createContext();
 
-const generateMockProjects = () => {
-    const today = new Date();
-    return [
-        { id: '1', title: 'YouTubeチャンネルOP制作', category: '編集', price: 25000, hours: 12, deliveryDate: format(today, 'yyyy-MM-dd'), status: '完遂', month: format(today, 'yyyy-MM') },
-        { id: '2', title: '企業PR動画撮影', category: '撮影', price: 150000, hours: 8, deliveryDate: format(today, 'yyyy-MM-dd'), status: 'チェック待ち', month: format(today, 'yyyy-MM') },
-        { id: '3', title: 'ウェディングムービー編集', category: '編集', price: 60000, hours: 20, deliveryDate: format(subDays(today, -5), 'yyyy-MM-dd'), status: '制作中', month: format(today, 'yyyy-MM') },
-    ];
-};
-
 export function ProjectProvider({ children }) {
     const [projects, setProjects] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
+    const isCloudConnected = !!supabase;
 
     // Initial load
     useEffect(() => {
@@ -39,18 +31,23 @@ export function ProjectProvider({ children }) {
                     setProjects(formattedData);
                 } catch (error) {
                     console.error('Error fetching from Supabase:', error);
+                    // Supabase接続失敗時はlocalStorageにフォールバック
+                    const saved = localStorage.getItem('videodash_projects');
+                    if (saved) {
+                        try { setProjects(JSON.parse(saved)); } catch (e) { /* ignore */ }
+                    }
                 }
             } else {
-                // Fallback to localStorage
+                // Fallback to localStorage (モックデータは使用しない)
                 const saved = localStorage.getItem('videodash_projects');
                 if (saved) {
                     try {
                         setProjects(JSON.parse(saved));
                     } catch (e) {
-                        setProjects(generateMockProjects());
+                        setProjects([]);
                     }
                 } else {
-                    setProjects(generateMockProjects());
+                    setProjects([]);
                 }
             }
             setIsLoading(false);
@@ -66,8 +63,7 @@ export function ProjectProvider({ children }) {
     }, [projects, isLoading]);
 
     const addProject = async (project) => {
-        const isCloudSync = !!supabase;
-        const generatedId = Math.random().toString(36).substr(2, 9); // For local only
+        const generatedId = Math.random().toString(36).substr(2, 9);
         const month = project.deliveryDate ? project.deliveryDate.substring(0, 7) : format(new Date(), 'yyyy-MM');
 
         let newProject = { ...project, id: generatedId, month };
@@ -75,9 +71,8 @@ export function ProjectProvider({ children }) {
         // Optimistic UI update
         setProjects((prev) => [newProject, ...prev]);
 
-        if (isCloudSync) {
+        if (supabase) {
             try {
-                // Insert to Supabase (match column names)
                 const { data, error } = await supabase.from('projects').insert([{
                     title: project.title,
                     category: project.category,
@@ -97,7 +92,6 @@ export function ProjectProvider({ children }) {
                 } : p));
             } catch (error) {
                 console.error('Error inserting to Supabase:', error);
-                // Rollback optimistic update
                 setProjects((prev) => prev.filter(p => p.id !== generatedId));
                 alert('通信エラーが発生しました。案件を追加できませんでした。');
             }
@@ -105,7 +99,6 @@ export function ProjectProvider({ children }) {
     };
 
     const updateProjectStatus = async (id, newStatus) => {
-        // Optimistic UI update
         const previousProjects = [...projects];
         setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, status: newStatus } : p)));
 
@@ -115,14 +108,12 @@ export function ProjectProvider({ children }) {
                 if (error) throw error;
             } catch (error) {
                 console.error('Error updating Supabase:', error);
-                // Rollback
                 setProjects(previousProjects);
             }
         }
     };
 
     const deleteProject = async (id) => {
-        // Optimistic UI update
         const previousProjects = [...projects];
         setProjects((prev) => prev.filter((p) => p.id !== id));
 
@@ -132,18 +123,15 @@ export function ProjectProvider({ children }) {
                 if (error) throw error;
             } catch (error) {
                 console.error('Error deleting from Supabase:', error);
-                // Rollback
                 setProjects(previousProjects);
             }
         }
     };
 
     const editProject = async (id, updatedData) => {
-        // Prepare data for DB and State
         const month = updatedData.deliveryDate ? updatedData.deliveryDate.substring(0, 7) : format(new Date(), 'yyyy-MM');
         const updatedProject = { ...updatedData, id, month };
 
-        // Optimistic UI update
         const previousProjects = [...projects];
         setProjects((prev) => prev.map((p) => (p.id === id ? updatedProject : p)));
 
@@ -160,18 +148,39 @@ export function ProjectProvider({ children }) {
                 if (error) throw error;
             } catch (error) {
                 console.error('Error updating project in Supabase:', error);
-                // Rollback
                 setProjects(previousProjects);
                 alert('通信エラーが発生しました。案件を更新できませんでした。');
             }
         }
     };
 
+    // CSV出力機能
+    const exportToCSV = () => {
+        if (projects.length === 0) {
+            alert('エクスポートする案件データがありません。');
+            return;
+        }
+        const headers = ['案件名', 'カテゴリ', '単価(円)', '作業時間(h)', '納品日', 'ステータス'];
+        const rows = projects.map(p => [
+            p.title, p.category, p.price, p.hours, p.deliveryDate, p.status
+        ]);
+        const csvContent = [headers, ...rows].map(r => r.join(',')).join('\n');
+        const bom = '\uFEFF';
+        const blob = new Blob([bom + csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `videodash_projects_${format(new Date(), 'yyyyMMdd')}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
     return (
-        <ProjectContext.Provider value={{ projects, addProject, editProject, updateProjectStatus, deleteProject, isLoading }}>
+        <ProjectContext.Provider value={{ projects, addProject, editProject, updateProjectStatus, deleteProject, exportToCSV, isLoading, isCloudConnected }}>
             {children}
         </ProjectContext.Provider>
     );
 }
 
 export const useProjects = () => useContext(ProjectContext);
+
