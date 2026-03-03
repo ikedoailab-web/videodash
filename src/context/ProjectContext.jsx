@@ -7,7 +7,7 @@ const ProjectContext = createContext();
 export function ProjectProvider({ children }) {
     const [projects, setProjects] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
-    const isCloudConnected = !!supabase;
+    const [isCloudConnected, setIsCloudConnected] = useState(!!supabase);
 
     // Initial load
     useEffect(() => {
@@ -29,8 +29,10 @@ export function ProjectProvider({ children }) {
                         month: item.delivery_date ? item.delivery_date.substring(0, 7) : format(new Date(), 'yyyy-MM')
                     }));
                     setProjects(formattedData);
+                    setIsCloudConnected(true);
                 } catch (error) {
                     console.error('Error fetching from Supabase:', error);
+                    setIsCloudConnected(false);
                     // Supabase接続失敗時はlocalStorageにフォールバック
                     const saved = localStorage.getItem('videodash_projects');
                     if (saved) {
@@ -57,10 +59,10 @@ export function ProjectProvider({ children }) {
 
     // Effect for local storage sync (only if not using Supabase)
     useEffect(() => {
-        if (!supabase && !isLoading) {
+        if (!supabase || !isCloudConnected) {
             localStorage.setItem('videodash_projects', JSON.stringify(projects));
         }
-    }, [projects, isLoading]);
+    }, [projects, isLoading, isCloudConnected]);
 
     const addProject = async (project) => {
         const generatedId = Math.random().toString(36).substr(2, 9);
@@ -71,7 +73,7 @@ export function ProjectProvider({ children }) {
         // Optimistic UI update
         setProjects((prev) => [newProject, ...prev]);
 
-        if (supabase) {
+        if (supabase && isCloudConnected) {
             try {
                 const { data, error } = await supabase.from('projects').insert([{
                     title: project.title,
@@ -92,8 +94,9 @@ export function ProjectProvider({ children }) {
                 } : p));
             } catch (error) {
                 console.error('Error inserting to Supabase:', error);
-                setProjects((prev) => prev.filter(p => p.id !== generatedId));
-                alert('通信エラーが発生しました。案件を追加できませんでした。');
+                setIsCloudConnected(false);
+                // Supabaseが使えない場合でもローカルには保存したままにする
+                alert(`通信エラーが発生しましたが、データはこの端末には保存されています。\n\n詳細: ${error.message ?? error}`);
             }
         }
     };
@@ -102,13 +105,14 @@ export function ProjectProvider({ children }) {
         const previousProjects = [...projects];
         setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, status: newStatus } : p)));
 
-        if (supabase) {
+        if (supabase && isCloudConnected) {
             try {
                 const { error } = await supabase.from('projects').update({ status: newStatus }).eq('id', id);
                 if (error) throw error;
             } catch (error) {
                 console.error('Error updating Supabase:', error);
-                setProjects(previousProjects);
+                setIsCloudConnected(false);
+                // ローカルの変更はそのまま維持する
             }
         }
     };
@@ -117,13 +121,14 @@ export function ProjectProvider({ children }) {
         const previousProjects = [...projects];
         setProjects((prev) => prev.filter((p) => p.id !== id));
 
-        if (supabase) {
+        if (supabase && isCloudConnected) {
             try {
                 const { error } = await supabase.from('projects').delete().eq('id', id);
                 if (error) throw error;
             } catch (error) {
                 console.error('Error deleting from Supabase:', error);
-                setProjects(previousProjects);
+                setIsCloudConnected(false);
+                // ローカルの削除はそのまま維持する
             }
         }
     };
@@ -135,7 +140,7 @@ export function ProjectProvider({ children }) {
         const previousProjects = [...projects];
         setProjects((prev) => prev.map((p) => (p.id === id ? updatedProject : p)));
 
-        if (supabase) {
+        if (supabase && isCloudConnected) {
             try {
                 const { error } = await supabase.from('projects').update({
                     title: updatedData.title,
@@ -148,8 +153,9 @@ export function ProjectProvider({ children }) {
                 if (error) throw error;
             } catch (error) {
                 console.error('Error updating project in Supabase:', error);
-                setProjects(previousProjects);
-                alert('通信エラーが発生しました。案件を更新できませんでした。');
+                setIsCloudConnected(false);
+                // ローカルの変更はそのまま維持しつつ、ユーザーには詳細を伝える
+                alert(`通信エラーが発生しましたが、データはこの端末には保存されています。\n\n詳細: ${error.message ?? error}`);
             }
         }
     };
